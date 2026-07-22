@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Environment / secrets
+.env
+.env.*
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Downloaded corpus / generated artifacts (large, reproducible via scripts)
+data/raw_pdfs/
+data/processed/
+data/cache/
+
+# Vector stores / indexes
+*.faiss
+*.index
+chroma_db/
+.chroma/
+vector_store/
+
+# Model weights / caches
+models/
+*.bin
+*.gguf
+*.safetensors
+.cache/
+huggingface_cache/
+
+# Experiment tracking / logs
+logs/
+runs/
+outputs/
+mlruns/
+wandb/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Test / coverage
+.pytest_cache/
+.coverage
+htmlcov/
