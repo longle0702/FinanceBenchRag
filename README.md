@@ -183,10 +183,42 @@ the latest re-chunked corpus:
 | Narrative (84,382 chunks) | 204 words | 193 words | 107–293 | 1–1,578 |
 | Table (32,356 chunks) | 79 words | 77 words | 63–93 | 18–431 |
 
-## 5. What's next (not built yet)
+## 5. Build the vector index
 
-5. **Indexing** — turn each chunk's text into a vector embedding, store in a vector
-   database (e.g. FAISS or Chroma).
+```
+python scripts/build_index.py                                            # embed + index every chunk, both backends
+python scripts/build_index.py --doc-name 3M_2018_10K --backend chroma --overwrite   # test on one doc first
+python scripts/build_index.py --embedding-model sentence-transformers/all-mpnet-base-v2
+```
+
+Embeds every chunk's `text` with **`sentence-transformers/all-MiniLM-L6-v2`** (384-dim,
+~22M params, CPU-friendly, free/local — configurable via `--embedding-model` since the
+assignment calls for comparing embedding models) and stores the vectors in one or both
+vector-store backends:
+
+- **Chroma** (`data/processed/index/chroma`) — stores vectors *and* metadata together.
+- **FAISS** (`data/processed/index/faiss`) — `IndexFlatIP` over normalized vectors
+  (cosine similarity), plus an `ids.json` sidecar since FAISS has no native metadata
+  storage.
+
+Both backends are kept "dumb" (id + vector + minimal filter metadata only) — full
+chunk text, section/page info, and neighbor links are always resolved through a shared
+`ChunkStore` at query time, not duplicated into the vector store itself. Every build
+writes `data/processed/index/index_manifest.json` (embedding model, backend, chunk
+count, timestamp) for reproducibility.
+
+**Latest full-corpus index build**, over all 116,738 chunks from the current corpus:
+
+| | |
+|---|---|
+| Embedding model | `sentence-transformers/all-MiniLM-L6-v2` |
+| Chunks embedded | 116,738 |
+| Time | 6,283.5s (~1h 45m), CPU-only |
+| Chroma vectors | 116,738 |
+| FAISS vectors | 116,738 |
+
+## 6. What's next (not built yet)
+
 6. **Retrieval** — given a question, find the most similar chunk(s) by vector search,
    then expand with neighboring chunks for context.
 7. **Generation** — pass the retrieved passages to a local, free LLM (e.g. Llama,
@@ -201,8 +233,8 @@ the latest re-chunked corpus:
 |---|---|
 | 1. Download PDFs | Done |
 | 2. Extract text/tables/glossary | Done |
-| 3. Index into a vector store | Not started |
-| 4. Retrieval | Not started |
+| 3. Index into a vector store | Done |
+| 4. Retrieval | Basic pipeline built (`scripts/retrieve.py`), not yet validated at scale |
 | 5. Generation | Not started |
 | 6. Evaluation | Not started |
 
@@ -267,5 +299,11 @@ larger table chunks reduce total chunk count (embedding/index cost) while still
 being far more targeted than the original 20. Worth re-validating with the same
 rank-check method once the full corpus is re-processed, and worth treating as a
 genuine ablation value (3 vs 5 vs 8...) for the report rather than assuming 5 is
-optimal. The full 279-doc corpus has **not** been re-extracted or re-indexed with
-this new default yet — that's a separate, larger re-run still to be done.
+optimal.
+
+**Update: full corpus re-extracted and re-indexed with `table_row_group_size=5`.**
+All 279 docs re-processed (84,382 narrative + 32,356 table chunks, see Status above)
+and the full vector index rebuilt on top of it (116,738 vectors, both backends). The
+rank-check itself has **not** yet been re-run against this full-corpus index — worth
+doing next to confirm `5` still behaves well once the "Total assets" chunk is
+competing against candidates from all 279 documents, not just one.
