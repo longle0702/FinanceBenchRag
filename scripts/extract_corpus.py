@@ -274,6 +274,7 @@ def main() -> None:
     parser.add_argument("--min-chunk-tokens", type=int, default=40, help="Narrative chunks smaller than this get merged into the previous chunk")
     parser.add_argument("--table-backend", choices=["pymupdf", "pdfplumber"], default="pymupdf", help="Table extraction backend")
     parser.add_argument("--table-format", choices=["markdown", "html", "sentences"], default="markdown", help="Serialization format for table chunk text")
+    parser.add_argument("--table-row-group-size", type=int, default=5, help="Max unique row labels per table chunk before splitting into another chunk")
     parser.add_argument("--no-table-images", action="store_true", help="Skip cropping/saving a PNG/JPEG of each detected table region")
     parser.add_argument("--table-image-format", choices=["png", "jpg"], default="png", help="Image format for cropped table images")
     parser.add_argument("--table-image-dpi", type=int, default=300, help="Resolution (DPI) for cropped table images")
@@ -290,6 +291,7 @@ def main() -> None:
         min_chunk_tokens=args.min_chunk_tokens,
         table_backend=args.table_backend,
         table_format=args.table_format,
+        table_row_group_size=args.table_row_group_size,
         table_images_enabled=not args.no_table_images,
         table_image_format=args.table_image_format,
         table_image_dpi=args.table_image_dpi,

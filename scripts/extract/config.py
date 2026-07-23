@@ -13,7 +13,7 @@ class ExtractionConfig:
     min_chunk_tokens: int = 40  # narrative chunks smaller than this get merged into the previous chunk
     table_backend: str = "pymupdf"  # "pymupdf" | "pdfplumber"
     table_format: str = "markdown"  # "markdown" | "html" | "sentences"
-    table_row_group_size: int = 20
+    table_row_group_size: int = 5
     table_images_enabled: bool = True
     table_image_dpi: int = 300
     table_image_format: str = "png"  # "png" | "jpg"

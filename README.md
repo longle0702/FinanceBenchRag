@@ -109,6 +109,7 @@ flags, so it's safe to experiment without touching any code:
 | Minimum narrative chunk size | `--min-chunk-tokens` | 40 tokens |
 | Table backend | `--table-backend` | pymupdf |
 | Table text format | `--table-format` | markdown |
+| Rows per table chunk | `--table-row-group-size` | 5 (was 20 — changed after testing showed smaller groups substantially improve retrieval precision for specific numeric facts; see "Problems" below) |
 | Table images | `--no-table-images` (disables) | on, 300 DPI PNG |
 
 The full parameter list (boilerplate detection, heading detection, table-region
@@ -187,3 +188,40 @@ Latest full-corpus extraction run, over all 360 documents in the catalog:
 | **Glossary entries extracted** | ~9,800 |
 
 This README is updated as each step lands.
+
+## Problems / known issues
+
+**Table chunks are too coarse for precise numeric-fact retrieval.** Tested by
+building a vector index (`scripts/build_index.py`, both Chroma and FAISS backends,
+`sentence-transformers/all-MiniLM-L6-v2`) for `3M_2018_10K` and querying
+`"What was 3M's total assets in 2018?"` (`scripts/retrieve.py`). The Balance Sheet
+chunk containing the actual answer ("Total assets, 2018: $36,500") **is** in the
+index, but ranked **#106 out of 396 chunks** (score 0.365) — nowhere near a
+realistic top-k. Both backends agreed on the ranking, and the rest of the pipeline
+(filtering, neighbor expansion, glossary lookup) worked correctly, so this isn't a
+retrieval-pipeline bug — it's a chunking-granularity problem: `table_row_group_size`
+(default 20) packs ~20 unrelated line items — cash, receivables, inventories, PP&E,
+goodwill, total assets, etc. — into one chunk, and a sentence-embedding model pools
+over the whole chunk, so the resulting vector represents "a generic mix of balance
+sheet items" rather than "total assets" specifically. A natural-language query about
+one line item can't cut through that dilution.
+
+Candidate fixes (not yet decided between): shrink `table_row_group_size` so each
+table chunk covers far fewer rows (currently being tested — see below); try a
+larger/different embedding model; or add exact/keyword matching alongside semantic
+search for numeric-fact queries. Worth keeping as a concrete case study for the
+report's Error Analysis section either way.
+
+**Update after testing `--table-row-group-size 3` on the same document**: confirmed
+the fix. Re-extracted `3M_2018_10K` with `--table-row-group-size 3` (was 20),
+rebuilt the index (471 chunks, up from 396), and re-ran the same query. The
+"Total assets" chunk jumped from **rank #106/396 (score 0.365) to rank #5/471
+(score 0.590)** — now inside a realistic top-5. One residual nuance: rank #1 for
+this query is actually a *different* line item, "Total other current assets"
+(page 80), which scores even higher (0.676) purely because "Total" + "assets"
+overlap lexically/semantically with the query despite being the wrong fact — both
+the right and wrong "total" show up together in the top-5, which a downstream
+generation step would need to disambiguate using the full retrieved text, not just
+the ranking. `table_row_group_size` is now exposed as `--table-row-group-size` on
+`extract_corpus.py` for further tuning. Not yet re-run across the full 279-doc
+corpus — this was validated on one document only.

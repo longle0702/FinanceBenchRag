@@ -25,6 +25,7 @@ written to `data/processed/extraction_config.json` on every run, for reproducibi
 |---|---|---|---|
 | `chunk_size` | `--chunk-size` | `450` (tokens, `tiktoken` cl100k_base) | Target size of a narrative chunk before a new one starts |
 | `chunk_overlap` | `--chunk-overlap` | `60` (tokens) | Trailing context carried into the next chunk (sliding window) |
+| `min_chunk_tokens` | `--min-chunk-tokens` | `40` (tokens) | Narrative chunks smaller than this are merged into the previous chunk (or carried forward if there's none) rather than standing alone — see "Problems" in `README.md` for why |
 
 **Table extraction & serialization**
 
@@ -32,7 +33,7 @@ written to `data/processed/extraction_config.json` on every run, for reproducibi
 |---|---|---|---|
 | `table_backend` | `--table-backend` | `pymupdf` (or `pdfplumber`) | Which library detects table grids |
 | `table_format` | `--table-format` | `markdown` (or `html`, `sentences`) | How a table's cells are serialized into chunk `text` |
-| `table_row_group_size` | — | `20` (unique row labels) | Large tables split into multiple chunks of this many rows each |
+| `table_row_group_size` | `--table-row-group-size` | `20` (unique row labels) | Large tables split into multiple chunks of this many rows each. **Retrieval finding** (see `README.md` → "Problems"): with the default of 20, a specific numeric fact (e.g. "Total assets") got buried in the embedding of ~20 unrelated line items and ranked #106/396 for a direct query about it; dropping this to `3` moved it to #5/471 in the same test. Worth tuning as a real ablation, not just left at the default. |
 | `table_images_enabled` | `--no-table-images` (disables) | `True` | Whether to crop+save an image of each detected table region |
 | `table_image_format` | `--table-image-format` | `png` (or `jpg`) | Cropped table image file format |
 | `table_image_dpi` | `--table-image-dpi` | `300` | Resolution of cropped table images |
