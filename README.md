@@ -51,8 +51,8 @@ What it does:
   failed) so you can see what's missing and why.
 - **Known failures you can't fix**: a handful of company investor-relations sites block
   non-browser downloads or have dead links (e.g. Johnson & Johnson's IR domain no longer
-  resolves at all). Re-running `--retry-failed` won't help those; it's expected that a
-  small number of filings (~70 out of 287) end up missing. The rest of the pipeline is
+  resolves at all). Re-running `--retry-failed` won't help those; 73 of the 360 filings
+  listed in the catalog end up permanently missing this way. The rest of the pipeline is
   built to tolerate that gracefully rather than fail on it.
 
 ## 4. Extract text, tables, and glossary terms from the PDFs
@@ -94,10 +94,46 @@ Every chunk also carries metadata — which document/page/section it came from, 
 which chunk comes right before/after it — so a later retrieval step can pull in
 neighboring chunks for extra context, not just the single best match.
 
+A page that has no extractable text at all (i.e. it's a scanned image, not real text) is
+detected and skipped rather than producing garbage — this turned out to apply to all 8
+KraftHeinz filings in the catalog, which are scanned images with no text layer. OCR is
+not implemented, so these are logged as `likely_scanned_or_image` and left out.
+
 Useful options (chunk size, table format, image DPI, etc.) are all listed with defaults
 in **[EXTRACTION_PLAN.md](EXTRACTION_PLAN.md)** under "Configuration reference" — that
 file also explains the *why* behind each design choice (font-kerning quirks in these
 PDFs, why tables need a different detection strategy than plain text, etc.).
+
+## Data cleaning
+
+Raw text pulled straight out of a PDF is messy — it comes out line-by-line, not as
+proper paragraphs, and repeats things like page headers on every single page. Before
+anything gets chunked or embedded, each document goes through these cleaning steps:
+
+1. **Repeated header/footer removal** — any line (e.g. a "Table of Contents" running
+   footer) that shows up on more than 60% of a document's pages gets detected once and
+   stripped everywhere, so it never pollutes a chunk's text (`pdf_io.compute_boilerplate_lines`).
+2. **De-hyphenation** — PDFs wrap words across lines with a hyphen (`"cash-"` /
+   `"equivalents"`); these get rejoined into `"cash equivalents"` (`narrative.HYPHEN_BREAK_RE`).
+3. **Whitespace normalization** — repeated spaces/tabs collapsed to one space.
+4. **Paragraph reconstruction** — the PDF gives text one line at a time; lines are
+   regrouped into real paragraphs based on the vertical spacing between them
+   (`narrative.join_block_paragraphs`).
+5. **Table cell cleaning** — currency/negative-sign symbols that land in their own grid
+   cell (e.g. `"$"` next to `"2,853"`) are merged back together, and every value is
+   parsed into a proper positive/negative number, filtering out fragments that aren't
+   really values (`tables._merge_prefix_cells`, `tables.parse_numeric`).
+6. **Corrupt-file isolation** — if one PDF is broken or unreadable, only that document
+   fails (logged with its error); the rest of the batch keeps going.
+
+(Scanned/image pages with no real text layer — see the KraftHeinz case above — are also
+caught here and skipped rather than cleaned, since there's no text to clean.)
+
+What's deliberately **not** done: no lowercasing, stemming, or stopword removal — those
+would hurt embedding quality for semantic search, not help it. The font-kerning glitch
+that occasionally splits a word in two (e.g. `"Cash and cash e quivalents"`) is left as
+a documented known limitation rather than patched with a fragile heuristic — see
+`EXTRACTION_PLAN.md`'s Edge Cases section for why.
 
 ## 5. What's next (not built yet)
 
@@ -121,5 +157,16 @@ PDFs, why tables need a different detection strategy than plain text, etc.).
 | 4. Retrieval | Not started |
 | 5. Generation | Not started |
 | 6. Evaluation | Not started |
+
+Latest full-corpus extraction run, over all 360 documents in the catalog:
+
+| | Count |
+|---|---|
+| Processed successfully | 279 |
+| Missing (download failed — see step 3 above) | 73 |
+| Skipped (scanned image, no text layer — all 8 KraftHeinz filings) | 8 |
+| **Narrative chunks produced** | ~125,400 |
+| **Table chunks produced** | ~12,000 |
+| **Glossary entries extracted** | ~9,800 |
 
 This README is updated as each step lands.
