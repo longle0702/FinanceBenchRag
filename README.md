@@ -78,6 +78,28 @@ Each filing gets read once, page by page, and split into three kinds of content:
   into a separate per-document lookup file, so an abbreviation found anywhere later can
   be expanded to its full meaning by simple lookup instead of another search.
 
+### Narrative chunk rules
+
+| # | Rule | Detail |
+|---|---|---|
+| 1 | Paragraph is the base unit | Lines are grouped into paragraphs by vertical gap (>1.5x line height = new paragraph); boilerplate lines dropped, hyphenated line-wraps rejoined first. |
+| 2 | Never crosses a section boundary | Section tracked via PDF table of contents or heading-line detection (font-size ratio `heading_font_size_ratio`); buffer is flushed the moment the section changes. |
+| 3 | Never crosses into/out of a table | Hitting a table region always flushes the pending narrative buffer first. |
+| 4 | Greedy sliding-window packing by tokens | Paragraphs fill a chunk up to `chunk_size` (450 tokens); the trailing ~`chunk_overlap` tokens (60) carry forward into the next chunk. A single paragraph is never split mid-paragraph. |
+| 5 | Tiny trailing fragments get merged | Any packed group under `min_chunk_tokens` (40) merges into the previous narrative chunk, or is held and carried forward across headings/tables until there's real content to attach to. Only emitted alone at end-of-document if nothing is left to merge into. |
+| 6 | Metadata + neighbor linking | Each chunk records `section`, `section_id`, `page_start`/`page_end`, `chunk_index`; `prev_chunk_id`/`next_chunk_id` are linked across the whole document afterward for neighbor-context expansion. |
+
+### Table chunk rules
+
+| # | Rule | Detail |
+|---|---|---|
+| 1 | Region must look like a real table | Candidate regions need >=2 rows and >=20% of non-blank rows carrying a real numeric value (`is_plausible_table`), filtering out whitespace-aligned prose misdetected as a table. |
+| 2 | Values peeled off the right, not by column position | Kerning gaps can split a word across grid cells, so column-index alignment is unreliable; each row's trailing run of numeric-looking cells is peeled off the right, everything left of it is the row label. Stray `$`/`(` prefix cells are merged back onto the following value. |
+| 3 | Header rows detected by content | A row is a header row if every value is a bare 4-digit year (e.g. `2018`); this (re)sets the running column headers as the scan proceeds, so it works whether the header appears once or repeats mid-table. The majority column-header tuple across all rows is used as the canonical column order. |
+| 4 | Chunked by unique row label, not tokens | Rows are split into groups of `table_row_group_size` (5) *unique row labels* each, serialized independently in `table_format` (markdown/html/sentences) with a title/context header line so each chunk is self-contained. A parallel `structured.rows` field keeps exact label/column/value data for lookup. |
+| 5 | One cropped image per table, shared by all its chunks | If enabled, the whole table's bbox (+ padding) is cropped once to a PNG/JPG at `table_image_dpi`; every row-group chunk split from that table references the same image path. |
+| 6 | Flush boundary with narrative | Encountering a table always flushes pending narrative text first, so a table chunk never contains narrative text and vice versa. |
+
 What you get afterwards, all under `data/processed/`:
 
 ```
@@ -153,10 +175,50 @@ that occasionally splits a word in two (e.g. `"Cash and cash e quivalents"`) is 
 a documented known limitation rather than patched with a fragile heuristic — see
 `EXTRACTION_PLAN.md`'s Edge Cases section for why.
 
-## 5. What's next (not built yet)
+Roughly how many words end up in each chunk, measured across all 116,738 chunks in
+the latest re-chunked corpus:
 
-5. **Indexing** — turn each chunk's text into a vector embedding, store in a vector
-   database (e.g. FAISS or Chroma).
+| Type | Mean | Median | P25–P75 | Range |
+|---|---|---|---|---|
+| Narrative (84,382 chunks) | 204 words | 193 words | 107–293 | 1–1,578 |
+| Table (32,356 chunks) | 79 words | 77 words | 63–93 | 18–431 |
+
+## 5. Build the vector index
+
+```
+python scripts/build_index.py                                            # embed + index every chunk, both backends
+python scripts/build_index.py --doc-name 3M_2018_10K --backend chroma --overwrite   # test on one doc first
+python scripts/build_index.py --embedding-model sentence-transformers/all-mpnet-base-v2
+```
+
+Embeds every chunk's `text` with **`sentence-transformers/all-MiniLM-L6-v2`** (384-dim,
+~22M params, CPU-friendly, free/local — configurable via `--embedding-model` since the
+assignment calls for comparing embedding models) and stores the vectors in one or both
+vector-store backends:
+
+- **Chroma** (`data/processed/index/chroma`) — stores vectors *and* metadata together.
+- **FAISS** (`data/processed/index/faiss`) — `IndexFlatIP` over normalized vectors
+  (cosine similarity), plus an `ids.json` sidecar since FAISS has no native metadata
+  storage.
+
+Both backends are kept "dumb" (id + vector + minimal filter metadata only) — full
+chunk text, section/page info, and neighbor links are always resolved through a shared
+`ChunkStore` at query time, not duplicated into the vector store itself. Every build
+writes `data/processed/index/index_manifest.json` (embedding model, backend, chunk
+count, timestamp) for reproducibility.
+
+**Latest full-corpus index build**, over all 116,738 chunks from the current corpus:
+
+| | |
+|---|---|
+| Embedding model | `sentence-transformers/all-MiniLM-L6-v2` |
+| Chunks embedded | 116,738 |
+| Time | 6,283.5s (~1h 45m), CPU-only |
+| Chroma vectors | 116,738 |
+| FAISS vectors | 116,738 |
+
+## 6. What's next (not built yet)
+
 6. **Retrieval** — given a question, find the most similar chunk(s) by vector search,
    then expand with neighboring chunks for context.
 7. **Generation** — pass the retrieved passages to a local, free LLM (e.g. Llama,
@@ -171,21 +233,26 @@ a documented known limitation rather than patched with a fragile heuristic — s
 |---|---|
 | 1. Download PDFs | Done |
 | 2. Extract text/tables/glossary | Done |
-| 3. Index into a vector store | Not started |
-| 4. Retrieval | Not started |
+| 3. Index into a vector store | Done |
+| 4. Retrieval | Basic pipeline built (`scripts/retrieve.py`), not yet validated at scale |
 | 5. Generation | Not started |
 | 6. Evaluation | Not started |
 
-Latest full-corpus extraction run, over all 360 documents in the catalog:
+Latest full-corpus extraction run, over all 360 documents in the catalog (re-run with
+`table_row_group_size=5`, `min_chunk_tokens=40` — the defaults documented above):
 
 | | Count |
 |---|---|
 | Processed successfully | 279 |
 | Missing (download failed — see step 3 above) | 73 |
 | Skipped (scanned image, no text layer — all 8 KraftHeinz filings) | 8 |
-| **Narrative chunks produced** | ~125,400 |
-| **Table chunks produced** | ~12,000 |
-| **Glossary entries extracted** | ~9,800 |
+| **Narrative chunks produced** | 84,382 |
+| **Table chunks produced** | 32,356 |
+| **Glossary entries extracted** | 9,831 |
+
+(Table chunk count roughly tripled vs. the original `table_row_group_size=20` run,
+as expected — smaller row groups mean more, more targeted chunks. Narrative chunk
+count dropped, from the tiny-fragment merging described above.)
 
 This README is updated as each step lands.
 
@@ -232,5 +299,11 @@ larger table chunks reduce total chunk count (embedding/index cost) while still
 being far more targeted than the original 20. Worth re-validating with the same
 rank-check method once the full corpus is re-processed, and worth treating as a
 genuine ablation value (3 vs 5 vs 8...) for the report rather than assuming 5 is
-optimal. The full 279-doc corpus has **not** been re-extracted or re-indexed with
-this new default yet — that's a separate, larger re-run still to be done.
+optimal.
+
+**Update: full corpus re-extracted and re-indexed with `table_row_group_size=5`.**
+All 279 docs re-processed (84,382 narrative + 32,356 table chunks, see Status above)
+and the full vector index rebuilt on top of it (116,738 vectors, both backends). The
+rank-check itself has **not** yet been re-run against this full-corpus index — worth
+doing next to confirm `5` still behaves well once the "Total assets" chunk is
+competing against candidates from all 279 documents, not just one.
