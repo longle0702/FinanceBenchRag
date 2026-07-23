@@ -78,6 +78,28 @@ Each filing gets read once, page by page, and split into three kinds of content:
   into a separate per-document lookup file, so an abbreviation found anywhere later can
   be expanded to its full meaning by simple lookup instead of another search.
 
+### Narrative chunk rules
+
+| # | Rule | Detail |
+|---|---|---|
+| 1 | Paragraph is the base unit | Lines are grouped into paragraphs by vertical gap (>1.5x line height = new paragraph); boilerplate lines dropped, hyphenated line-wraps rejoined first. |
+| 2 | Never crosses a section boundary | Section tracked via PDF table of contents or heading-line detection (font-size ratio `heading_font_size_ratio`); buffer is flushed the moment the section changes. |
+| 3 | Never crosses into/out of a table | Hitting a table region always flushes the pending narrative buffer first. |
+| 4 | Greedy sliding-window packing by tokens | Paragraphs fill a chunk up to `chunk_size` (450 tokens); the trailing ~`chunk_overlap` tokens (60) carry forward into the next chunk. A single paragraph is never split mid-paragraph. |
+| 5 | Tiny trailing fragments get merged | Any packed group under `min_chunk_tokens` (40) merges into the previous narrative chunk, or is held and carried forward across headings/tables until there's real content to attach to. Only emitted alone at end-of-document if nothing is left to merge into. |
+| 6 | Metadata + neighbor linking | Each chunk records `section`, `section_id`, `page_start`/`page_end`, `chunk_index`; `prev_chunk_id`/`next_chunk_id` are linked across the whole document afterward for neighbor-context expansion. |
+
+### Table chunk rules
+
+| # | Rule | Detail |
+|---|---|---|
+| 1 | Region must look like a real table | Candidate regions need >=2 rows and >=20% of non-blank rows carrying a real numeric value (`is_plausible_table`), filtering out whitespace-aligned prose misdetected as a table. |
+| 2 | Values peeled off the right, not by column position | Kerning gaps can split a word across grid cells, so column-index alignment is unreliable; each row's trailing run of numeric-looking cells is peeled off the right, everything left of it is the row label. Stray `$`/`(` prefix cells are merged back onto the following value. |
+| 3 | Header rows detected by content | A row is a header row if every value is a bare 4-digit year (e.g. `2018`); this (re)sets the running column headers as the scan proceeds, so it works whether the header appears once or repeats mid-table. The majority column-header tuple across all rows is used as the canonical column order. |
+| 4 | Chunked by unique row label, not tokens | Rows are split into groups of `table_row_group_size` (5) *unique row labels* each, serialized independently in `table_format` (markdown/html/sentences) with a title/context header line so each chunk is self-contained. A parallel `structured.rows` field keeps exact label/column/value data for lookup. |
+| 5 | One cropped image per table, shared by all its chunks | If enabled, the whole table's bbox (+ padding) is cropped once to a PNG/JPG at `table_image_dpi`; every row-group chunk split from that table references the same image path. |
+| 6 | Flush boundary with narrative | Encountering a table always flushes pending narrative text first, so a table chunk never contains narrative text and vice versa. |
+
 What you get afterwards, all under `data/processed/`:
 
 ```
@@ -153,6 +175,14 @@ that occasionally splits a word in two (e.g. `"Cash and cash e quivalents"`) is 
 a documented known limitation rather than patched with a fragile heuristic — see
 `EXTRACTION_PLAN.md`'s Edge Cases section for why.
 
+Roughly how many words end up in each chunk, measured across all 116,738 chunks in
+the latest re-chunked corpus:
+
+| Type | Mean | Median | P25–P75 | Range |
+|---|---|---|---|---|
+| Narrative (84,382 chunks) | 204 words | 193 words | 107–293 | 1–1,578 |
+| Table (32,356 chunks) | 79 words | 77 words | 63–93 | 18–431 |
+
 ## 5. What's next (not built yet)
 
 5. **Indexing** — turn each chunk's text into a vector embedding, store in a vector
@@ -176,16 +206,21 @@ a documented known limitation rather than patched with a fragile heuristic — s
 | 5. Generation | Not started |
 | 6. Evaluation | Not started |
 
-Latest full-corpus extraction run, over all 360 documents in the catalog:
+Latest full-corpus extraction run, over all 360 documents in the catalog (re-run with
+`table_row_group_size=5`, `min_chunk_tokens=40` — the defaults documented above):
 
 | | Count |
 |---|---|
 | Processed successfully | 279 |
 | Missing (download failed — see step 3 above) | 73 |
 | Skipped (scanned image, no text layer — all 8 KraftHeinz filings) | 8 |
-| **Narrative chunks produced** | ~125,400 |
-| **Table chunks produced** | ~12,000 |
-| **Glossary entries extracted** | ~9,800 |
+| **Narrative chunks produced** | 84,382 |
+| **Table chunks produced** | 32,356 |
+| **Glossary entries extracted** | 9,831 |
+
+(Table chunk count roughly tripled vs. the original `table_row_group_size=20` run,
+as expected — smaller row groups mean more, more targeted chunks. Narrative chunk
+count dropped, from the tiny-fragment merging described above.)
 
 This README is updated as each step lands.
 
