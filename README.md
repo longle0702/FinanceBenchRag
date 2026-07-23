@@ -99,10 +99,21 @@ detected and skipped rather than producing garbage — this turned out to apply 
 KraftHeinz filings in the catalog, which are scanned images with no text layer. OCR is
 not implemented, so these are logged as `likely_scanned_or_image` and left out.
 
-Useful options (chunk size, table format, image DPI, etc.) are all listed with defaults
-in **[EXTRACTION_PLAN.md](EXTRACTION_PLAN.md)** under "Configuration reference" — that
-file also explains the *why* behind each design choice (font-kerning quirks in these
-PDFs, why tables need a different detection strategy than plain text, etc.).
+The most commonly-changed settings, and their defaults — all of these are plain CLI
+flags, so it's safe to experiment without touching any code:
+
+| Setting | Flag | Default |
+|---|---|---|
+| Narrative chunk size | `--chunk-size` | 450 tokens |
+| Narrative chunk overlap | `--chunk-overlap` | 60 tokens |
+| Minimum narrative chunk size | `--min-chunk-tokens` | 40 tokens |
+| Table backend | `--table-backend` | pymupdf |
+| Table text format | `--table-format` | markdown |
+| Table images | `--no-table-images` (disables) | on, 300 DPI PNG |
+
+The full parameter list (boilerplate detection, heading detection, table-region
+thresholds, etc.) — plus the reasoning behind each default — is in
+**[EXTRACTION_PLAN.md](EXTRACTION_PLAN.md)** under "Configuration reference".
 
 ## Data cleaning
 
@@ -125,6 +136,12 @@ anything gets chunked or embedded, each document goes through these cleaning ste
    really values (`tables._merge_prefix_cells`, `tables.parse_numeric`).
 6. **Corrupt-file isolation** — if one PDF is broken or unreadable, only that document
    fails (logged with its error); the rest of the batch keeps going.
+7. **Tiny-fragment merging** — a section boundary, heading, or table can leave a
+   near-empty leftover (e.g. a lone page number between two tables, or a couple of
+   words after a heading) that would otherwise become its own near-content-free chunk.
+   Any packed chunk under `--min-chunk-tokens` (default 40 tokens) gets merged into the
+   previous narrative chunk, or carried forward across tables/headings until there's
+   real content to attach to (`extract_corpus.flush_narrative`).
 
 (Scanned/image pages with no real text layer — see the KraftHeinz case above — are also
 caught here and skipped rather than cleaned, since there's no text to clean.)

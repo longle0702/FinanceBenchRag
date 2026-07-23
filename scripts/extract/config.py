@@ -10,6 +10,7 @@ from pathlib import Path
 class ExtractionConfig:
     chunk_size: int = 450
     chunk_overlap: int = 60
+    min_chunk_tokens: int = 40  # narrative chunks smaller than this get merged into the previous chunk
     table_backend: str = "pymupdf"  # "pymupdf" | "pdfplumber"
     table_format: str = "markdown"  # "markdown" | "html" | "sentences"
     table_row_group_size: int = 20

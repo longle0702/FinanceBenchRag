@@ -96,23 +96,57 @@ def process_document(
         current_section_id: str | None = None
         current_section_title: str | None = None
 
-        def flush_narrative() -> None:
-            nonlocal chunk_index, narrative_buffer
-            if not narrative_buffer:
+        held_fragment: list[ParagraphUnit] = []
+
+        def flush_narrative(force: bool = False) -> None:
+            """Pack narrative_buffer into chunks. Any trailing group that falls below
+            min_chunk_tokens is merged into the previous narrative chunk when one is
+            available; otherwise it's held and carried forward to be packed together
+            with whatever narrative text comes next (across tables/headings), so a lone
+            fragment (e.g. a page number between two tables) never ends up as its own
+            near-empty chunk. `force=True` (end of document) always flushes it, since
+            nothing more is coming to merge it with."""
+            nonlocal chunk_index, narrative_buffer, held_fragment
+            buffer = held_fragment + narrative_buffer
+            held_fragment = []
+            narrative_buffer = []
+            if not buffer:
                 return
-            for group in narrative.pack_paragraphs(narrative_buffer, config):
-                text = "\n\n".join(p.text for p in group)
+            groups = narrative.pack_paragraphs(buffer, config)
+            pending: list[ParagraphUnit] = []
+            for i, group in enumerate(groups):
+                combined = pending + group
+                text = "\n\n".join(p.text for p in combined)
+                n_tokens = narrative.count_tokens(text)
+                is_last = i == len(groups) - 1
+                if n_tokens < config.min_chunk_tokens:
+                    prev = all_chunks[-1] if all_chunks else None
+                    if prev is not None and prev.chunk_type == "narrative":
+                        prev.text = prev.text + "\n\n" + text
+                        prev.n_tokens = narrative.count_tokens(prev.text)
+                        prev.page_end = combined[-1].page_num
+                        pending = []
+                        continue
+                    if not is_last or not force:
+                        # No prior narrative chunk to absorb this into: carry it forward
+                        # to merge with the next group in this batch, or (if this was the
+                        # last group and we're not forced) hold it for the next flush call.
+                        pending = combined
+                        continue
+                    # is_last and force with nothing to merge into: emit as-is below.
                 all_chunks.append(Chunk(
-                    chunk_id=make_chunk_id(doc_name, group[0].page_num, chunk_index),
+                    chunk_id=make_chunk_id(doc_name, combined[0].page_num, chunk_index),
                     doc_name=doc_name, doc_type=doc_type, company=company, doc_period=doc_period,
                     chunk_type="narrative",
                     section=group[0].section_title, section_id=group[0].section_id,
-                    page_start=group[0].page_num, page_end=group[-1].page_num,
-                    chunk_index=chunk_index, n_tokens=narrative.count_tokens(text), text=text,
+                    page_start=combined[0].page_num, page_end=combined[-1].page_num,
+                    chunk_index=chunk_index, n_tokens=n_tokens, text=text,
                     source={"extractor": "pymupdf.get_text"},
                 ))
                 chunk_index += 1
-            narrative_buffer = []
+                pending = []
+            if pending:
+                held_fragment = pending
 
         try:
             for page in doc:
@@ -188,7 +222,7 @@ def process_document(
                             ))
                             chunk_index += 1
 
-            flush_narrative()
+            flush_narrative(force=True)
         finally:
             if pdfplumber_doc:
                 pdfplumber_doc.close()
@@ -237,6 +271,7 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR, help="Directory to write processed chunks/glossary into")
     parser.add_argument("--chunk-size", type=int, default=450, help="Target narrative chunk size in tokens")
     parser.add_argument("--chunk-overlap", type=int, default=60, help="Narrative chunk overlap in tokens")
+    parser.add_argument("--min-chunk-tokens", type=int, default=40, help="Narrative chunks smaller than this get merged into the previous chunk")
     parser.add_argument("--table-backend", choices=["pymupdf", "pdfplumber"], default="pymupdf", help="Table extraction backend")
     parser.add_argument("--table-format", choices=["markdown", "html", "sentences"], default="markdown", help="Serialization format for table chunk text")
     parser.add_argument("--no-table-images", action="store_true", help="Skip cropping/saving a PNG/JPEG of each detected table region")
@@ -252,6 +287,7 @@ def main() -> None:
     config = ExtractionConfig(
         chunk_size=args.chunk_size,
         chunk_overlap=args.chunk_overlap,
+        min_chunk_tokens=args.min_chunk_tokens,
         table_backend=args.table_backend,
         table_format=args.table_format,
         table_images_enabled=not args.no_table_images,
