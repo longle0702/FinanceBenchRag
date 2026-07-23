@@ -222,6 +222,15 @@ this query is actually a *different* line item, "Total other current assets"
 overlap lexically/semantically with the query despite being the wrong fact — both
 the right and wrong "total" show up together in the top-5, which a downstream
 generation step would need to disambiguate using the full retrieved text, not just
-the ranking. `table_row_group_size` is now exposed as `--table-row-group-size` on
-`extract_corpus.py` for further tuning. Not yet re-run across the full 279-doc
-corpus — this was validated on one document only.
+the ranking.
+
+**Default changed to `table_row_group_size = 5`** (was 20). Note this specific
+value (5) was **not** independently re-tested — only `3` was empirically validated
+above; `5` was chosen as a middle ground between that result and keeping table
+chunks from becoming too numerous/granular, on the reasoning that fewer, slightly
+larger table chunks reduce total chunk count (embedding/index cost) while still
+being far more targeted than the original 20. Worth re-validating with the same
+rank-check method once the full corpus is re-processed, and worth treating as a
+genuine ablation value (3 vs 5 vs 8...) for the report rather than assuming 5 is
+optimal. The full 279-doc corpus has **not** been re-extracted or re-indexed with
+this new default yet — that's a separate, larger re-run still to be done.
