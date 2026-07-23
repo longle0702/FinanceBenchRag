@@ -16,12 +16,14 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import base64
 import csv
 import json
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -39,6 +41,25 @@ DEFAULT_USER_AGENT = "FinanceBenchRag/1.0 (duongnt.mindx@gmail.com)"
 
 class DownloadTimeout(Exception):
     """Raised when a single file's total download time exceeds the allowed budget."""
+
+
+def resolve_download_url(url: str) -> str:
+    """Some catalog links point at a JS viewer page rather than the raw PDF.
+
+    Adobe's investor-relations site serves links like
+    adobe.com/pdf-page.html?pdfTarget=<base64 of the real PDF URL>, which 404s
+    if fetched directly. Unwrap those to the underlying PDF URL.
+    """
+    parsed = urlparse(url)
+    if parsed.netloc == "www.adobe.com" and parsed.path == "/pdf-page.html":
+        target = parse_qs(parsed.query).get("pdfTarget", [None])[0]
+        if target:
+            padded = target + "=" * (-len(target) % 4)
+            try:
+                return base64.b64decode(padded).decode("utf-8")
+            except (ValueError, UnicodeDecodeError):
+                pass
+    return url
 
 
 # Each worker thread gets its own requests.Session and a fixed tqdm bar position
@@ -96,7 +117,13 @@ def build_session(user_agent: str, retries: int, backoff_factor: float) -> reque
     session = requests.Session()
     session.headers.update({
         "User-Agent": user_agent,
-        "Accept-Encoding": "gzip, deflate",
+        # Several corporate investor-relations CDNs (Q4, GCS-web, Cloudflare-fronted
+        # sites) WAF-block requests that don't look like a real browser. These extra
+        # headers don't help against strict TLS-fingerprint blocking, but they clear
+        # simpler header-based bot checks without changing what we identify as.
+        "Accept": "application/pdf,application/octet-stream;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
     })
     retry = Retry(
         total=retries,
@@ -127,6 +154,7 @@ def download_pdf(
     if dest.exists() and not overwrite and dest.stat().st_size > 0:
         return "skipped", None
 
+    url = resolve_download_url(url)
     tmp_path = dest.with_suffix(".part")
     start = time.monotonic()
     try:
@@ -172,12 +200,25 @@ def main() -> None:
     parser.add_argument("--overwrite", action="store_true", help="Re-download files that already exist")
     parser.add_argument("--limit", type=int, default=None, help="Only download the first N documents (useful for testing)")
     parser.add_argument("--report-path", type=Path, default=None, help="Where to write the CSV status report (default: <output-dir>/download_report.csv)")
+    parser.add_argument("--retry-failed", type=Path, default=None, help="Path to a previous download_report.csv; only re-attempts rows with status=failed, and merges the results back into the report")
     args = parser.parse_args()
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     report_path = args.report_path or (args.output_dir / "download_report.csv")
 
-    documents = load_documents(args.input)
+    kept_records: list[dict] = []
+    if args.retry_failed:
+        with args.retry_failed.open("r", newline="", encoding="utf-8") as f:
+            prior_rows = list(csv.DictReader(f))
+        documents = [
+            {"doc_name": r["doc_name"], "doc_link": r["doc_link"]}
+            for r in prior_rows if r["status"] == "failed"
+        ]
+        kept_records = [r for r in prior_rows if r["status"] != "failed"]
+        print(f"Retrying {len(documents)} previously failed link(s) from {args.retry_failed}")
+    else:
+        documents = load_documents(args.input)
+
     if args.limit:
         documents = documents[: args.limit]
 
@@ -204,14 +245,12 @@ def main() -> None:
         time.sleep(args.delay)
         return doc, status, error
 
-    counts = {"downloaded": 0, "skipped": 0, "failed": 0}
     records: list[dict] = []
 
     with ThreadPoolExecutor(max_workers=args.workers) as executor:
         futures = [executor.submit(_download_one, doc) for doc in documents]
         for future in as_completed(futures):
             doc, status, error = future.result()
-            counts[status] += 1
             records.append({
                 "doc_name": doc["doc_name"],
                 "doc_link": doc["doc_link"],
@@ -221,13 +260,19 @@ def main() -> None:
             overall_bar.update(1)
     overall_bar.close()
 
-    # Restore stable ordering (as_completed finishes in whatever order threads land in).
+    # Merge back any rows carried over from --retry-failed, and restore stable
+    # ordering (as_completed finishes in whatever order threads land in).
+    records = kept_records + records
     records.sort(key=lambda r: r["doc_name"])
 
     with report_path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=["doc_name", "doc_link", "status", "error"])
         writer.writeheader()
         writer.writerows(records)
+
+    counts = {"downloaded": 0, "skipped": 0, "failed": 0}
+    for r in records:
+        counts[r["status"]] += 1
 
     working = counts["downloaded"] + counts["skipped"]
     total = len(records)
