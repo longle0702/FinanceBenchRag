@@ -58,3 +58,8 @@ Thumbs.db
 .coverage
 htmlcov/
 docs/
+results/
+
+# Experiment outputs
+experiments/models/*/answers.jsonl
+experiments/models/*/run.log
