@@ -7,3 +7,10 @@ sentence-transformers>=3.0
 chromadb>=0.5
 faiss-cpu>=1.8
 torch>=2.0
+
+# Task 3: Answer Generation + Evaluation
+transformers>=4.40        # HuggingFace model hub + AutoModelForCausalLM
+accelerate>=0.30          # device_map="auto" support
+rouge-score>=0.1.2        # ROUGE-1/2/L evaluation
+bert-score>=0.3.13        # BERTScore semantic similarity evaluation
+nltk>=3.8                 # tokenisation utilities used by BERTScore
