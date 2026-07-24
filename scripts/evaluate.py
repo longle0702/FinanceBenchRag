@@ -94,8 +94,14 @@ def rouge_scores(pred: str, gold: str) -> dict[str, float]:
 def compute_bertscore(preds: list[str], refs: list[str]) -> list[float]:
     """Return per-sample BERTScore F1. Requires bert-score package."""
     from bert_score import score as bs_score
-    _, _, F1 = bs_score(preds, refs, lang="en", rescale_with_baseline=True, verbose=False)
-    return F1.tolist()
+    safe_preds = [p if (p and p.strip()) else "N/A" for p in preds]
+    safe_refs  = [r if (r and r.strip()) else "N/A" for r in refs]
+    _, _, F1 = bs_score(safe_preds, safe_refs, lang="en", rescale_with_baseline=True, verbose=False)
+    f1_list = F1.tolist()
+    for i, orig in enumerate(preds):
+        if not orig or not orig.strip():
+            f1_list[i] = 0.0
+    return f1_list
 
 
 # ══════════════════════════════════════════════════════════

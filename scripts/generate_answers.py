@@ -1,15 +1,3 @@
-"""
-Step 5: Answer Generation using a local HuggingFace LLM.
-
-Uses the existing retrieval pipeline to fetch relevant passages, then feeds them
-as context to a small free HuggingFace model (Qwen2.5-1.5B-Instruct) to generate
-grounded, cited answers.
-
-Usage:
-    python scripts/generate_answers.py --limit 20 --output results/answers.jsonl
-    python scripts/generate_answers.py --model Qwen/Qwen2.5-1.5B-Instruct --top-k 5
-    python scripts/generate_answers.py --doc-name 3M_2022_10K --limit 5
-"""
 from __future__ import annotations
 
 import argparse
@@ -138,6 +126,9 @@ def build_retrieval_pipeline(
     embedding_model: str,
     top_k: int,
     neighbor_window: int,
+    index_dir: Path = DEFAULT_INDEX_DIR,
+    chunks_dir: Path = DEFAULT_CHUNKS_DIR,
+    glossary_dir: Path = DEFAULT_GLOSSARY_DIR,
 ) -> RetrievalPipeline:
     config = RetrievalConfig(
         embedding_model=embedding_model,
@@ -145,12 +136,12 @@ def build_retrieval_pipeline(
         neighbor_window=neighbor_window,
     )
     if backend == "chroma":
-        vector_store = ChromaVectorStore(DEFAULT_INDEX_DIR / "chroma")
+        vector_store = ChromaVectorStore(index_dir / "chroma")
     else:
-        vector_store = FaissVectorStore(DEFAULT_INDEX_DIR / "faiss")
+        vector_store = FaissVectorStore(index_dir / "faiss")
 
-    chunk_store     = ChunkStore(DEFAULT_CHUNKS_DIR)
-    glossary_lookup = GlossaryLookup(DEFAULT_GLOSSARY_DIR)
+    chunk_store     = ChunkStore(chunks_dir)
+    glossary_lookup = GlossaryLookup(glossary_dir)
     return RetrievalPipeline(vector_store, chunk_store, glossary_lookup, config)
 
 
@@ -190,12 +181,14 @@ def main() -> None:
         "--model", default="Qwen/Qwen2.5-1.5B-Instruct",
         help="HuggingFace model ID (must be free/local-compatible)"
     )
-    parser.add_argument("--backend",         choices=["chroma", "faiss"], default="chroma")
+    parser.add_argument("--backend",         choices=["chroma", "faiss"], default="faiss")
     parser.add_argument("--embedding-model", default=embedding.DEFAULT_MODEL)
-    parser.add_argument("--top-k",           type=int, default=5)
+    parser.add_argument("--top-k",           type=int, default=10)
     parser.add_argument("--neighbor-window", type=int, default=1)
     parser.add_argument("--max-new-tokens",  type=int, default=256)
     parser.add_argument("--qa-file",         type=Path, default=DEFAULT_QA_FILE)
+    parser.add_argument("--index-dir",       type=Path, default=DEFAULT_INDEX_DIR)
+    parser.add_argument("--chunks-dir",      type=Path, default=DEFAULT_CHUNKS_DIR)
     parser.add_argument(
         "--output", type=Path, default=DEFAULT_OUTPUT_DIR / "answers.jsonl"
     )
@@ -216,7 +209,8 @@ def main() -> None:
 
     print("[Setup] Loading retrieval pipeline ...")
     pipeline = build_retrieval_pipeline(
-        args.backend, args.embedding_model, args.top_k, args.neighbor_window
+        args.backend, args.embedding_model, args.top_k, args.neighbor_window,
+        index_dir=args.index_dir, chunks_dir=args.chunks_dir
     )
 
     print(f"[Setup] Loading LLM: {args.model} ...")

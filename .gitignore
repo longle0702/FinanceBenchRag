@@ -33,7 +33,6 @@ chroma_db/
 vector_store/
 
 # Model weights / caches
-models/
 *.bin
 *.gguf
 *.safetensors
@@ -61,5 +60,5 @@ docs/
 results/
 
 # Experiment outputs
-experiments/models/*/answers.jsonl
-experiments/models/*/run.log
+experiments/*/*/answers.jsonl
+experiments/*/*/run.log

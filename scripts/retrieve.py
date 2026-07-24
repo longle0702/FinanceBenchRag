@@ -1,10 +1,3 @@
-"""
-Step 4: Query the vector index.
-
-Usage:
-    python scripts/retrieve.py "What was 3M's total assets in 2018?" --doc-name 3M_2018_10K --backend chroma --top-k 5
-    python scripts/retrieve.py "What does PP&E mean?" --backend faiss
-"""
 from __future__ import annotations
 
 import argparse
@@ -33,8 +26,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Query the retrieval pipeline.")
     parser.add_argument("query", help="The question to search for")
     parser.add_argument("--doc-name", default=None, help="Restrict search to this document")
-    parser.add_argument("--backend", choices=["chroma", "faiss"], default="chroma")
-    parser.add_argument("--top-k", type=int, default=5)
+    parser.add_argument("--backend", choices=["chroma", "faiss"], default="faiss")
+    parser.add_argument("--top-k", type=int, default=10)
     parser.add_argument("--neighbor-window", type=int, default=1)
     parser.add_argument("--embedding-model", default=embedding.DEFAULT_MODEL)
     parser.add_argument("--index-dir", type=Path, default=DEFAULT_INDEX_DIR)

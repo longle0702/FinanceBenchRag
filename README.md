@@ -2,7 +2,6 @@
 
 RAG system for answering questions over company financial filings (10-K, 10-Q, 8-K)
 using the [FinanceBench](https://github.com/patronus-ai/financebench) dataset.
-EPITA NLP graded project A — full brief: `Graded_project_instructions_A_RAG.pdf`.
 
 ## Setup
 
@@ -49,7 +48,7 @@ Output lands in `data/processed/`: `chunks/`, `glossary/`, `table_images/`.
 ### 3. Build the vector index
 
 ```bash
-python scripts/build_index.py                          # both backends, all chunks
+python scripts/build_index.py                          
 python scripts/build_index.py --backend chroma --overwrite --doc-name 3M_2018_10K
 python scripts/build_index.py --embedding-model sentence-transformers/all-mpnet-base-v2
 ```
@@ -88,9 +87,9 @@ python scripts/evaluate.py \
 | Flag | Default | Description |
 |---|---|---|
 | `--model` | `Qwen/Qwen2.5-1.5B-Instruct` | HuggingFace generation model |
-| `--backend` | `chroma` | `chroma` or `faiss` |
+| `--backend` | `faiss` | `chroma` or `faiss` |
 | `--embedding-model` | `all-MiniLM-L6-v2` | Must match the index |
-| `--top-k` | `5` | Retrieved passages per question |
+| `--top-k` | `10` | Retrieved passages per question |
 | `--neighbor-window` | `1` | Expand hits with ±N adjacent chunks |
 | `--max-new-tokens` | `256` | Max tokens to generate |
 | `--limit` | *(all)* | Cap at N questions |
@@ -104,7 +103,7 @@ python scripts/evaluate.py \
 |---|---|---|
 | `--answers` | `results/answers.jsonl` | Output from `generate_answers.py` |
 | `--output` | `results/eval_report.json` | JSON report path |
-| `--no-bertscore` | *(off)* | Skip BERTScore (slow on CPU) |
+| `--no-bertscore` | `False` | Set this to skip BERTScore |
 
 #### Metrics
 
@@ -119,62 +118,42 @@ python scripts/evaluate.py \
 | **Avg Generation (s)** | Mean LLM generation time per question |
 | **Avg Total Inference (s)** | Retrieval + generation combined |
 
-> **Diagnostic tip:** high Context Precision + low Token F1 → generation problem. Low Context Precision + low Token F1 → retrieval problem.
-
-#### `run_task3.sh` flags
-
-| Flag | Default |
-|---|---|
-| `--limit N` | `20` |
-| `--model MODEL` | `Qwen/Qwen2.5-1.5B-Instruct` |
-| `--backend chroma\|faiss` | `chroma` |
-| `--top-k N` | `5` |
-| `--max-new-tokens N` | `256` |
-| `--no-bertscore` | *(off)* |
-
-Results: `results/answers_<timestamp>.jsonl` + `results/eval_report_<timestamp>.json`.
 
 ### Experimental ablations
 
+We provide automated scripts to run ablation experiments across models, top-K values, and vector backends. These are located in the `experiments/` directory. Each script runs the generation and evaluation steps and outputs a summary of key metrics.
+
+#### 1. Model Comparison
+Compares generation models (e.g., `Qwen2.5-1.5B`, `SmolLM2-1.7B`, `Phi-1.5`).
 ```bash
-# Different generation model
-bash scripts/run_task3.sh --model Qwen/Qwen2.5-7B-Instruct --limit 100
+bash experiments/models/run_model_comparison.sh
+```
+Results are saved in `experiments/models/<model_name>/`.
 
-# Different k
-bash scripts/run_task3.sh --top-k 10 --limit 100
+#### 2. Top-K Comparison
+Compares retrieval configurations for `k=3`, `5`, `7`, and `10`.
+```bash
+bash experiments/num_k/run_k_experiment.sh
+```
+Results are saved in `experiments/num_k/k_<value>/`.
 
-# FAISS backend
-bash scripts/run_task3.sh --backend faiss --limit 100
+#### 3. Vector Backend Comparison
+Compares `chroma` and `faiss` backends.
+```bash
+bash experiments/embeddings/run_backend_experiment.sh
+```
+Results are saved in `experiments/embeddings/<backend_name>/`.
 
-# Different embedding model (re-index first)
-python scripts/build_index.py --embedding-model sentence-transformers/all-mpnet-base-v2 --overwrite
-python scripts/generate_answers.py --embedding-model sentence-transformers/all-mpnet-base-v2 \
-  --limit 100 --output results/answers_mpnet.jsonl
-python scripts/evaluate.py --answers results/answers_mpnet.jsonl
+### Utilities
+
+**Manual Retrieval Querying**  
+Test the retrieval pipeline interactively for a specific query:
+```bash
+python scripts/retrieve.py "What was the revenue in 2022?" --top-k 5
 ```
 
-## Status
-
-| Step | Status |
-|---|---|
-| 1. Download PDFs | ✅ Done |
-| 2. Extract text / tables / glossary | ✅ Done |
-| 3. Build vector index (Chroma + FAISS) | ✅ Done |
-| 4. Retrieval pipeline | ✅ Done |
-| 5. Answer generation | ✅ Done |
-| 6. Evaluation | ✅ Done |
-
-Corpus stats (279 docs processed, `table_row_group_size=5`):
-
-| | Count |
-|---|---|
-| Narrative chunks | 84,382 |
-| Table chunks | 32,356 |
-| Glossary entries | 9,831 |
-| **Total vectors indexed** | **116,738** |
-
-## Known issues
-
-- **73 filings permanently missing** — dead links on SEC EDGAR / company IR sites; the pipeline skips them gracefully.
-- **8 KraftHeinz filings are scanned images** — no text layer, OCR not implemented, logged as `likely_scanned_or_image`.
-- **Semantic search can miss specific numeric facts** in large table chunks — `table_row_group_size=5` (down from 20) substantially improves retrieval precision for line-item queries. Worth investigating as an ablation.
+**Benchmarking Embeddings**  
+Estimate full-corpus embedding time by benchmarking on a single document:
+```bash
+python scripts/benchmark_embedding.py --doc-name NIKE_2022_10K --batch-size 64
+```
