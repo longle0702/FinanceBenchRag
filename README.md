@@ -146,8 +146,18 @@ Results are saved in `experiments/embeddings/<backend_name>/`.
 
 ### Utilities
 
+**Interactive Question Answering (Inference)**  
+Ask arbitrary questions and get LLM-generated answers based on the retrieved corpus. You can run a single query from the command line or enter an interactive chat loop:
+```bash
+# Single query mode
+python scripts/inference.py "What was the revenue in 2022?" --top-k 5
+
+# Interactive loop mode (prompts for questions continuously)
+python scripts/inference.py --backend faiss --model Qwen/Qwen2.5-1.5B-Instruct
+```
+
 **Manual Retrieval Querying**  
-Test the retrieval pipeline interactively for a specific query:
+Test the retrieval pipeline interactively for a specific query without LLM generation:
 ```bash
 python scripts/retrieve.py "What was the revenue in 2022?" --top-k 5
 ```
