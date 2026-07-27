@@ -181,7 +181,7 @@ def main() -> None:
         "--model", default="Qwen/Qwen2.5-1.5B-Instruct",
         help="HuggingFace model ID (must be free/local-compatible)"
     )
-    parser.add_argument("--backend",         choices=["chroma", "faiss"], default="faiss")
+    parser.add_argument("--backend",         choices=["chroma", "faiss"], default="chroma")
     parser.add_argument("--embedding-model", default=embedding.DEFAULT_MODEL)
     parser.add_argument("--top-k",           type=int, default=10)
     parser.add_argument("--neighbor-window", type=int, default=1)
@@ -202,6 +202,12 @@ def main() -> None:
     )
     parser.add_argument("--device", default="auto",
                         help="Device: auto, cpu, cuda, mps")
+    parser.add_argument("--eval", action="store_true",
+                        help="Automatically evaluate generated answers after completion")
+    parser.add_argument("--eval-output", type=Path, default=None,
+                        help="Path to save evaluation JSON report (when --eval is set)")
+    parser.add_argument("--no-bertscore", action="store_true",
+                        help="Skip BERTScore computation during evaluation")
     args = parser.parse_args()
 
     # ── setup ────────────────────────────────────────────────────────────────
@@ -280,6 +286,16 @@ def main() -> None:
         print()
 
     print(f"\nDone. {len(results)} answers written to {args.output}")
+
+    if args.eval and results:
+        from evaluate import evaluate, print_report
+        print("\n[Eval] Automatically running evaluation on generated answers...")
+        report = evaluate(results, use_bertscore=not args.no_bertscore)
+        if args.eval_output:
+            args.eval_output.parent.mkdir(parents=True, exist_ok=True)
+            args.eval_output.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+            print(f"[Eval] Full evaluation report saved to {args.eval_output}")
+        print_report(report)
 
 
 if __name__ == "__main__":

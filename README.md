@@ -96,6 +96,9 @@ python scripts/evaluate.py \
 | `--doc-name` | *(all)* | Restrict to one document |
 | `--device` | `auto` | `cpu`, `cuda`, or `mps` |
 | `--output` | `results/answers.jsonl` | Output path |
+| `--eval` | `False` | Auto-run evaluation suite when generation finishes |
+| `--eval-output` | `None` | Output JSON path for auto-evaluation report |
+| `--no-bertscore` | `False` | Skip BERTScore during auto-evaluation |
 
 #### `evaluate.py` flags
 

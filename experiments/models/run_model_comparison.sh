@@ -7,7 +7,7 @@ SCRIPTS_DIR="$REPO_ROOT/scripts"
 OUT_BASE="$SCRIPT_DIR"
 
 # ── defaults ──────────────────────────────────────────────────────────────────
-BACKEND="faiss"
+BACKEND="chroma"
 TOP_K=10
 NEIGHBOR_WINDOW=1
 MAX_NEW_TOKENS=256
